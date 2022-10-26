@@ -6,6 +6,12 @@
 
 // STL version
 
+constexpr std::chrono::milliseconds WaitForEndTime(200);
+constexpr std::chrono::seconds WaitInfinityTime(100);
+constexpr std::chrono::duration < double, std::milli> WaitAfterOperation(5);
+constexpr int MaxSynchoTime(500);
+constexpr std::chrono::duration < double, std::milli> WaitForCheck(50);
+
 std::mutex Vector_Lock;
 std::mutex Main_Mutex;
 std::mutex* Marker_Mutex;
@@ -28,10 +34,9 @@ void Marker(std::vector<int>& Arr, int num)
 	std::unique_lock<std::mutex> Marker_Wait(Marker_Mutex[num - 1]);
 	Vector_Lock.lock();
 
-	int index; // oblivious
-	int marked_count = 0; // oblivious
+	int index; 
+	int marked_count = 0; 
 	std::vector<int> marked_array(Arr.size()); // array to mark indexes of marked elements... cringe
-	std::chrono::duration < double, std::milli> wait(5);
 
 	for (size_t i = 0; i < Arr.size(); i++)
 	{
@@ -42,28 +47,26 @@ void Marker(std::vector<int>& Arr, int num)
 
 	while (true)
 	{
-		index = rand() % Arr.size(); // random index in {Inf.Arr}
+		index = rand() % Arr.size();
 
 		if (Arr[index] == 0)
 		{
-			std::this_thread::sleep_for(wait);
-			Arr[index] = num; // the operation
-			marked_count++; // how much is marked
+			std::this_thread::sleep_for(WaitAfterOperation);
+			Arr[index] = num; 
+			marked_count++; 
 			marked_array[index] = 1; // marking indexes to clear them later
-			std::this_thread::sleep_for(wait);
+			std::this_thread::sleep_for(WaitAfterOperation);
 		}
 		else
 		{
-			std::cout << "Thread number: " << num
-				<< ", marked_count: " << marked_count
-				<< ", unmarked index: " << index << std::endl;
+			std::cout << "Thread number: " << num << ", marked_count: " << marked_count << ", unmarked index: " << index << std::endl;
 
 			cond_val_temporal_workend[num - 1].notify_one();
-			Vector_Lock.unlock(); // Work is ended temporarily -- allow other threads to work
+			Vector_Lock.unlock();
 
-			cond_val_continue[num - 1].wait_for(Marker_Wait, std::chrono::seconds(10));
+			cond_val_continue[num - 1].wait_for(Marker_Wait, WaitInfinityTime);
 
-			if (cond_val_end[num - 1].wait_for(Marker_Wait, std::chrono::milliseconds(200)) == std::cv_status::timeout)
+			if (cond_val_end[num - 1].wait_for(Marker_Wait, WaitForEndTime) == std::cv_status::timeout)
 			{
 				Vector_Lock.lock();
 				break; // cycle ending
@@ -83,9 +86,7 @@ void Marker(std::vector<int>& Arr, int num)
 		}
 	} // filling all marked elements with 0 before leaving
 
-	// <code> std::cout << "Thread number: " << num << " job done" << std::endl;
-
-	Vector_Lock.unlock(); // Work is ended permanently -- allow other threads to work
+	Vector_Lock.unlock();
 
 	return;
 }
@@ -109,7 +110,7 @@ int main() {
 
 	int synchro_time = 0;
 	if (thread_emount != 0)
-		synchro_time = 500 / thread_emount;
+		synchro_time = MaxSynchoTime / thread_emount;
 	std::chrono::duration < double, std::milli> synchronization_time(synchro_time);
 	//  for threads to work in {thread_number} - growing sequence [used in this_thread::sleep_for]
 
@@ -123,7 +124,7 @@ int main() {
 	{
 		Vector_Lock.unlock();
 		Threads[i] = std::thread(Marker, std::ref(Arr), i + 1);
-		cond_val_temporal_workend[i].wait_for(Main_Lock, std::chrono::seconds(1));
+		cond_val_temporal_workend[i].wait_for(Main_Lock, WaitInfinityTime);
 		Vector_Lock.lock();
 	}
 
@@ -133,7 +134,22 @@ int main() {
 	{
 		int break_num;
 		std::cout << "Enter num of Marker() to break: ";
-		std::cin >> break_num;
+		do
+		{
+			std::cin >> break_num;
+			if (break_num < 1 || break_num > thread_emount)
+			{
+				std::cout << "This one doesn't exist, try another: ";
+				continue;
+			}
+			else if (end_of_threads[break_num - 1] == 0)
+			{
+				std::cout << "This one is stopped, try another: ";
+				continue;
+			}
+			break;
+		} while (true);
+
 		break_num--; // input of index of Thread to stop 
 
 		Vector_Lock.unlock();
@@ -145,7 +161,9 @@ int main() {
 
 		std::cout << "Array: ";
 		for (int i = 0; i < Arr.size(); ++i)
+		{
 			std::cout << Arr[i] << " "; // Console output of {inf.Arr}
+		}
 		std::cout << std::endl;
 
 		end_of_threads[break_num] = 0; // Proof, that thread (number {break_num}) is stopped
@@ -154,12 +172,11 @@ int main() {
 		{
 			if (end_of_threads[i] != 0)
 			{
-				// <code> std::cout << "Thread: " << i + 1 << std::endl;
 				Vector_Lock.unlock();
 				cond_val_continue[i].notify_all();
-				std::this_thread::sleep_for(std::chrono::duration < double, std::milli>(50));
+				std::this_thread::sleep_for(WaitForCheck);
 				cond_val_end[i].notify_all();
-				cond_val_temporal_workend[i].wait_for(Main_Lock, std::chrono::seconds(1));
+				cond_val_temporal_workend[i].wait_for(Main_Lock, WaitInfinityTime);
 				Vector_Lock.lock();
 			}
 		}
@@ -167,10 +184,10 @@ int main() {
 
 	Vector_Lock.unlock();
 
-	delete[] cond_val_continue;
-	delete[] cond_val_end;
-	delete[] cond_val_temporal_workend;
 	delete[] Marker_Mutex;
+	delete[] cond_val_temporal_workend;
+	delete[] cond_val_end;
+	delete[] cond_val_continue;
 
 	return 0;
 }
